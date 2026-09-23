@@ -1,0 +1,89 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="MauiApp3.MainPage">
+
+    <ScrollView>
+        <VerticalStackLayout
+            Padding="29"
+            Spacing="15">
+            <Label 
+                Text="Dodaj gracza"
+                FontSize="24"
+                FontAttributes="Bold"/>
+            <Entry
+                Placeholder="Nazwa gracza"
+                Text="{Binding PlayerName}"/>
+            <Entry
+                Placeholder="Poziom gracza"
+                Keyboard="Numeric"
+                Text="{Binding PlayerLevel}"/>
+            <Button
+                Text="Dodaj gracza"
+                Command="{Binding AddPlayerCommandButton}" />
+            
+            
+            
+            
+
+            <Label
+                Text="Lista graczy"
+                FontSize="24"
+                FontAttributes="Bold"
+                Margin="0,20,0,0"/>
+            <CollectionView
+    ItemsSource="{Binding Players}"
+    HeightRequest="250">
+
+                <CollectionView.ItemTemplate>
+
+                    <DataTemplate>
+
+                        <Grid
+                Padding="10"
+                ColumnDefinitions="50,*,100">
+
+                            <Label
+                    Grid.Column="0"
+                    Text="{Binding Id}" />
+
+                            <Label
+                    Grid.Column="1"
+                    Text="{Binding Name}" />
+
+                            <Label
+                    Grid.Column="2"
+                    Text="{Binding Level}" />
+
+                        </Grid>
+
+                    </DataTemplate>
+
+                </CollectionView.ItemTemplate>
+
+            </CollectionView>
+
+
+            <Label
+                Text="Znajdź gracza"
+                FontSize="24"
+                FontAttributes="Bold"
+                Margin="0,20,0,0"/>
+
+            <Entry
+                Placeholder="Podaj Id gracza"
+                Keyboard="Numeric"
+                Text="{Binding PlayerId}"/>
+            <Button
+                Text="Szukaj"
+                Command="{Binding FindPlayerCommandButton}"/>
+            <Label
+                Text="Wynik"
+                FontAttributes="Bold"/>
+            <Label
+                Text="{Binding SearchResult}"
+                FontSize="18"/>
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>
