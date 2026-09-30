@@ -1,84 +1,48 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
-title Konfiguracja .NET MAUI - Windows v4
+title Konfiguracja .NET MAUI - Windows v5
 
 cd /d "%~dp0"
 
+set "ROOT=%~dp0"
 set "LOG=%~dp0setup_maui_log.txt"
-> "%LOG%" echo ===== SETUP MAUI WINDOWS v4 =====
+
+> "%LOG%" echo ===== SETUP MAUI WINDOWS v5 =====
 >>"%LOG%" echo Start: %DATE% %TIME%
 >>"%LOG%" echo Katalog: %CD%
 >>"%LOG%" echo.
 
-call :MAIN >>"%LOG%" 2>&1
-set "RESULT=%ERRORLEVEL%"
-
-echo.
 echo ============================================================
-if "%RESULT%"=="0" (
-    echo                         GOTOWE
-) else (
-    echo                         BLAD
-)
+echo        KONFIGURACJA .NET MAUI - WINDOWS v5
 echo ============================================================
 echo.
-echo Pelny log zapisano tutaj:
-echo %LOG%
-echo.
-
-if not "%RESULT%"=="0" (
-    echo W razie bledu wyslij setup_maui_log.txt.
-)
-
-echo.
-pause
-exit /b %RESULT%
-
-
-:MAIN
-
-echo ============================================================
-echo     KONFIGURACJA .NET MAUI - WINDOWS DESKTOP v4
-echo ============================================================
+echo Ta wersja:
+echo - nie uzywa ProgramFiles(x86),
+echo - nie wymaga systemowego .NET, jezeli go brakuje,
+echo - w razie potrzeby instaluje lokalny .NET 10 do folderu .dotnet,
+echo - dla .NET 9 przerabia projekt na net9 Windows,
+echo - dla .NET 10 zostawia net10 Windows,
+echo - instaluje tylko workload MAUI dla Windows.
 echo.
 
 rem ============================================================
-rem 1. Uprawnienia administratora
+rem 1. Projekt
 rem ============================================================
 
-net session >nul 2>&1
-if errorlevel 1 (
-    echo [INFO] Potrzebne sa uprawnienia administratora.
-    echo [INFO] Uruchamiam ponownie jako administrator...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-      "Start-Process -FilePath '%~f0' -WorkingDirectory '%~dp0' -Verb RunAs"
-    exit /b 0
-)
+set "PROJECT=%ROOT%MauiApp3\MauiApp3.csproj"
 
-rem ============================================================
-rem 2. Znalezienie projektu
-rem ============================================================
-
-set "PROJECT="
-
-if exist "%~dp0MauiApp3\MauiApp3.csproj" (
-    set "PROJECT=%~dp0MauiApp3\MauiApp3.csproj"
-)
-
-if not defined PROJECT if exist "%~dp0MauiApp3.csproj" (
-    set "PROJECT=%~dp0MauiApp3.csproj"
-)
-
-if not defined PROJECT (
-    for /r "%~dp0" %%F in (*.csproj) do (
+if not exist "!PROJECT!" (
+    set "PROJECT="
+    for /r "%ROOT%" %%F in (*.csproj) do (
         if not defined PROJECT set "PROJECT=%%~fF"
     )
 )
 
 if not defined PROJECT (
     echo [BLAD] Nie znaleziono pliku .csproj.
-    exit /b 1
+    >>"%LOG%" echo [BLAD] Nie znaleziono pliku .csproj.
+    goto :ERROR
 )
 
 for %%F in ("!PROJECT!") do (
@@ -88,94 +52,58 @@ for %%F in ("!PROJECT!") do (
 
 echo [OK] Projekt:
 echo      !PROJECT!
+>>"%LOG%" echo [OK] Projekt: !PROJECT!
 echo.
 
 rem ============================================================
-rem 3. Zapewnienie dzialajacego polecenia dotnet
+rem 2. Szukamy dzialajacego SDK 10 lub 9
 rem ============================================================
 
-call :FIND_DOTNET
-
-if errorlevel 1 (
-    echo [BRAK] Nie znaleziono dzialajacego .NET SDK.
-    echo [INFO] Probuje zainstalowac .NET 10 SDK przez WinGet...
-    call :INSTALL_DOTNET_WINGET
-
-    call :FIND_DOTNET
-
-    if errorlevel 1 (
-        echo.
-        echo [UWAGA] WinGet nie dostarczyl dzialajacego dotnet.
-        echo [INFO] Probuje oficjalnego instalatora Microsoft dotnet-install.ps1...
-        call :INSTALL_DOTNET_SCRIPT
-
-        call :FIND_DOTNET
-
-        if errorlevel 1 (
-            echo.
-            echo [BLAD] Po obu probach nadal nie znaleziono dotnet.exe.
-            echo.
-            echo Sprawdzone lokalizacje:
-            echo   %ProgramFiles%\dotnet\dotnet.exe
-            echo   %ProgramFiles(x86)%\dotnet\dotnet.exe
-            echo.
-            exit /b 1
-        )
-    )
-)
-
-echo [OK] dotnet.exe:
-where dotnet
-echo.
-
-echo [INFO] Zainstalowane SDK:
-dotnet --list-sdks
-
-if errorlevel 1 (
-    echo [BLAD] dotnet.exe istnieje, ale dotnet --list-sdks nie dziala.
-    exit /b 1
-)
-
-echo.
-
-rem ============================================================
-rem 4. Wybieranie SDK
-rem Preferujemy 10; jesli go nie ma, 9.
-rem ============================================================
-
+set "DOTNET_CMD="
 set "SELECTED_SDK="
 set "NET_MAJOR="
 
-for /f "tokens=1" %%S in ('dotnet --list-sdks ^| findstr /r "^10\."') do (
-    set "SELECTED_SDK=%%S"
-    set "NET_MAJOR=10"
-)
+where dotnet >nul 2>&1
+if not errorlevel 1 (
+    set "DOTNET_CMD=dotnet"
+    call :SELECT_SDK
 
-if not defined SELECTED_SDK (
-    for /f "tokens=1" %%S in ('dotnet --list-sdks ^| findstr /r "^9\."') do (
-        set "SELECTED_SDK=%%S"
-        set "NET_MAJOR=9"
+    if defined SELECTED_SDK (
+        echo [OK] Uzywam systemowego .NET.
     )
 )
 
+rem ============================================================
+rem 3. Brak odpowiedniego SDK -> lokalny .NET 10
+rem ============================================================
+
 if not defined SELECTED_SDK (
-    echo [INFO] dotnet dziala, ale nie ma SDK 9 ani 10.
-    echo [INFO] Instaluje .NET 10 SDK oficjalnym instalatorem...
-    call :INSTALL_DOTNET_SCRIPT
+    echo [INFO] Brak dzialajacego SDK .NET 9/10.
+    echo [INFO] Instaluje lokalnie .NET 10 SDK do:
+    echo        %ROOT%.dotnet
+    echo.
 
-    call :FIND_DOTNET
-    if errorlevel 1 exit /b 1
+    >>"%LOG%" echo [INFO] Instalacja lokalnego .NET 10.
 
-    for /f "tokens=1" %%S in ('dotnet --list-sdks ^| findstr /r "^10\."') do (
-        set "SELECTED_SDK=%%S"
-        set "NET_MAJOR=10"
+    call :INSTALL_LOCAL_DOTNET10
+    if errorlevel 1 goto :ERROR
+
+    set "DOTNET_CMD=%ROOT%.dotnet\dotnet.exe"
+
+    call :SELECT_SDK
+
+    if not defined SELECTED_SDK (
+        echo [BLAD] Lokalny .NET zostal zainstalowany, ale SDK 10 nadal nie jest widoczne.
+        >>"%LOG%" echo [BLAD] Brak SDK po lokalnej instalacji.
+        goto :ERROR
     )
 )
 
-if not defined SELECTED_SDK (
-    echo [BLAD] Nie znaleziono SDK .NET 9 ani 10.
-    exit /b 1
-)
+echo.
+echo [OK] Wybrane SDK: !SELECTED_SDK!
+echo [OK] Polecenie: !DOTNET_CMD!
+>>"%LOG%" echo [OK] Wybrane SDK: !SELECTED_SDK!
+>>"%LOG%" echo [OK] Polecenie dotnet: !DOTNET_CMD!
 
 if "!NET_MAJOR!"=="9" (
     set "TFM=net9.0-windows10.0.19041.0"
@@ -183,38 +111,33 @@ if "!NET_MAJOR!"=="9" (
     set "TFM=net10.0-windows10.0.19041.0"
 )
 
-echo [OK] Wybrane SDK: !SELECTED_SDK!
 echo [OK] Target: !TFM!
+>>"%LOG%" echo [OK] Target: !TFM!
 echo.
 
 rem ============================================================
-rem 5. global.json
+rem 4. global.json
 rem ============================================================
 
-set "GLOBAL_JSON=%~dp0global.json"
-
-> "!GLOBAL_JSON!" echo {
->>"!GLOBAL_JSON!" echo   "sdk": {
->>"!GLOBAL_JSON!" echo     "version": "!SELECTED_SDK!",
->>"!GLOBAL_JSON!" echo     "rollForward": "latestPatch"
->>"!GLOBAL_JSON!" echo   }
->>"!GLOBAL_JSON!" echo }
+> "%ROOT%global.json" echo {
+>>"%ROOT%global.json" echo   "sdk": {
+>>"%ROOT%global.json" echo     "version": "!SELECTED_SDK!",
+>>"%ROOT%global.json" echo     "rollForward": "latestPatch"
+>>"%ROOT%global.json" echo   }
+>>"%ROOT%global.json" echo }
 
 echo [OK] Utworzono global.json.
+>>"%LOG%" echo [OK] Utworzono global.json.
 
-set "ACTIVE_SDK="
-for /f "tokens=*" %%V in ('dotnet --version 2^>nul') do set "ACTIVE_SDK=%%V"
-
-if not defined ACTIVE_SDK (
-    echo [BLAD] Po utworzeniu global.json dotnet --version nie dziala.
-    exit /b 1
+"!DOTNET_CMD!" --version
+if errorlevel 1 (
+    echo [BLAD] dotnet --version nie dziala.
+    >>"%LOG%" echo [BLAD] dotnet --version nie dziala.
+    goto :ERROR
 )
 
-echo [OK] Aktywne SDK: !ACTIVE_SDK!
-echo.
-
 rem ============================================================
-rem 6. Kopia projektu
+rem 5. Kopia .csproj
 rem ============================================================
 
 set "BACKUP=!PROJECT!.before-maui-setup.bak"
@@ -222,79 +145,41 @@ set "BACKUP=!PROJECT!.before-maui-setup.bak"
 if not exist "!BACKUP!" (
     copy /y "!PROJECT!" "!BACKUP!" >nul
     if errorlevel 1 (
-        echo [BLAD] Nie udalo sie wykonac kopii .csproj.
-        exit /b 1
+        echo [BLAD] Nie udalo sie utworzyc kopii .csproj.
+        goto :ERROR
     )
     echo [OK] Utworzono kopie .csproj.
 ) else (
     echo [INFO] Kopia .csproj juz istnieje.
 )
 
-echo.
-
 rem ============================================================
-rem 7. Modyfikacja csproj
-rem Uzywamy PowerShell tylko jako parsera XML.
-rem Dotychczasowy blad wystepowal PRZED tym etapem - przy braku dotnet.
+rem 6. Zmiana projektu na Windows-only
 rem ============================================================
-
-set "PSFILE=%TEMP%\maui_project_config_%RANDOM%_%RANDOM%.ps1"
-
-> "!PSFILE!" echo $ErrorActionPreference = 'Stop'
->>"!PSFILE!" echo $project = $env:MAUI_PROJECT
->>"!PSFILE!" echo $tfm = $env:MAUI_TFM
->>"!PSFILE!" echo $major = $env:MAUI_MAJOR
->>"!PSFILE!" echo [xml]$xml = Get-Content -LiteralPath $project -Raw
->>"!PSFILE!" echo $tfms = $xml.Project.PropertyGroup.TargetFrameworks
->>"!PSFILE!" echo $tfmNode = $xml.Project.PropertyGroup.TargetFramework
->>"!PSFILE!" echo if ($tfms) {
->>"!PSFILE!" echo     foreach ($node in @($xml.Project.PropertyGroup.TargetFrameworks)) { if ($node) { $node = $tfm } }
->>"!PSFILE!" echo     $pg = @($xml.Project.PropertyGroup ^| Where-Object { $_.TargetFrameworks })[0]
->>"!PSFILE!" echo     $pg.TargetFrameworks = $tfm
->>"!PSFILE!" echo } elseif ($tfmNode) {
->>"!PSFILE!" echo     $pg = @($xml.Project.PropertyGroup ^| Where-Object { $_.TargetFramework })[0]
->>"!PSFILE!" echo     $pg.TargetFramework = $tfm
->>"!PSFILE!" echo } else {
->>"!PSFILE!" echo     throw 'Nie znaleziono TargetFramework ani TargetFrameworks.'
->>"!PSFILE!" echo }
->>"!PSFILE!" echo foreach ($ig in @($xml.Project.ItemGroup)) {
->>"!PSFILE!" echo     foreach ($pr in @($ig.PackageReference)) {
->>"!PSFILE!" echo         if ($pr.Include -eq 'Microsoft.Extensions.Logging.Debug') {
->>"!PSFILE!" echo             if ($major -eq '9') { $pr.Version = '9.0.0' } else { $pr.Version = '10.0.0' }
->>"!PSFILE!" echo         }
->>"!PSFILE!" echo     }
->>"!PSFILE!" echo }
->>"!PSFILE!" echo if ($major -eq '9') {
->>"!PSFILE!" echo     foreach ($pg2 in @($xml.Project.PropertyGroup)) {
->>"!PSFILE!" echo         if ($pg2.MauiXamlInflator) { $pg2.RemoveChild($pg2.MauiXamlInflator) ^| Out-Null }
->>"!PSFILE!" echo     }
->>"!PSFILE!" echo }
->>"!PSFILE!" echo $settings = New-Object System.Xml.XmlWriterSettings
->>"!PSFILE!" echo $settings.Indent = $true
->>"!PSFILE!" echo $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
->>"!PSFILE!" echo $writer = [System.Xml.XmlWriter]::Create($project, $settings)
->>"!PSFILE!" echo $xml.Save($writer)
->>"!PSFILE!" echo $writer.Dispose()
->>"!PSFILE!" echo Write-Host ('[OK] Projekt ustawiony na ' + $tfm)
 
 set "MAUI_PROJECT=!PROJECT!"
 set "MAUI_TFM=!TFM!"
 set "MAUI_MAJOR=!NET_MAJOR!"
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "!PSFILE!"
-set "PS_RESULT=!ERRORLEVEL!"
+echo.
+echo [INFO] Dostosowuje MauiApp3.csproj...
 
-del /q "!PSFILE!" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand CgAkAEUAcgByAG8AcgBBAGMAdABpAG8AbgBQAHIAZQBmAGUAcgBlAG4AYwBlACAAPQAgACcAUwB0AG8AcAAnAAoACgAkAHAAIAA9ACAAJABlAG4AdgA6AE0AQQBVAEkAXwBQAFIATwBKAEUAQwBUAAoAJAB0AGYAbQAgAD0AIAAkAGUAbgB2ADoATQBBAFUASQBfAFQARgBNAAoAJABtAGEAagBvAHIAIAA9ACAAJABlAG4AdgA6AE0AQQBVAEkAXwBNAEEASgBPAFIACgAKACQAbABpAG4AZQBzACAAPQAgAFsASQBPAC4ARgBpAGwAZQBdADoAOgBSAGUAYQBkAEEAbABsAEwAaQBuAGUAcwAoACQAcAApAAoAJABvAHUAdAAgAD0AIABOAGUAdwAtAE8AYgBqAGUAYwB0ACAAJwBTAHkAcwB0AGUAbQAuAEMAbwBsAGwAZQBjAHQAaQBvAG4AcwAuAEcAZQBuAGUAcgBpAGMALgBMAGkAcwB0AFsAcwB0AHIAaQBuAGcAXQAnAAoAJABpAG4AcwBlAHIAdABlAGQAIAA9ACAAJABmAGEAbABzAGUACgAKAGYAbwByAGUAYQBjAGgAIAAoACQAbABpAG4AZQAwACAAaQBuACAAJABsAGkAbgBlAHMAKQAgAHsACgAgACAAIAAgACQAbABpAG4AZQAgAD0AIAAkAGwAaQBuAGUAMAAKAAoAIAAgACAAIAAjACAAUgBlAHAAbwAgAGgAYQBzACAAdABoAHIAZQBlACAAVABhAHIAZwBlAHQARgByAGEAbQBlAHcAbwByAGsAcwAgAGwAaQBuAGUAcwAgACgAQQBuAGQAcgBvAGkAZAAsACAAaQBPAFMALwBNAGEAYwBDAGEAdABhAGwAeQBzAHQALAAgAFcAaQBuAGQAbwB3AHMAKQAuAAoAIAAgACAAIAAjACAARgBvAHIAIAB0AGgAaQBzACAAcwBlAHQAdQBwACAAdwBlACAAawBlAGUAcAAgAG8AbgBsAHkAIABXAGkAbgBkAG8AdwBzAC4ACgAgACAAIAAgAGkAZgAgACgAJABsAGkAbgBlACAALQBtAGEAdABjAGgAIAAnADwAVABhAHIAZwBlAHQARgByAGEAbQBlAHcAbwByAGsAcwAoAD8AOgBcAHMAfAA+ACkAJwApACAAewAKACAAIAAgACAAIAAgACAAIABjAG8AbgB0AGkAbgB1AGUACgAgACAAIAAgAH0ACgAKACAAIAAgACAAaQBmACAAKAAtAG4AbwB0ACAAJABpAG4AcwBlAHIAdABlAGQAIAAtAGEAbgBkACAAJABsAGkAbgBlACAALQBtAGEAdABjAGgAIAAnADwAUAByAG8AcABlAHIAdAB5AEcAcgBvAHUAcAA+ACcAKQAgAHsACgAgACAAIAAgACAAIAAgACAAJABvAHUAdAAuAEEAZABkACgAJABsAGkAbgBlACkACgAgACAAIAAgACAAIAAgACAAJABpAG4AZABlAG4AdAAgAD0AIAAoACQAbABpAG4AZQAgAC0AcgBlAHAAbABhAGMAZQAgACcAPABQAHIAbwBwAGUAcgB0AHkARwByAG8AdQBwAD4ALgAqACQAJwAsACAAJwAnACkAIAArACAAIgBgAHQAIgAKACAAIAAgACAAIAAgACAAIAAkAG8AdQB0AC4AQQBkAGQAKAAkAGkAbgBkAGUAbgB0ACAAKwAgACcAPABUAGEAcgBnAGUAdABGAHIAYQBtAGUAdwBvAHIAawA+ACcAIAArACAAJAB0AGYAbQAgACsAIAAnADwALwBUAGEAcgBnAGUAdABGAHIAYQBtAGUAdwBvAHIAawA+ACcAKQAKACAAIAAgACAAIAAgACAAIAAkAGkAbgBzAGUAcgB0AGUAZAAgAD0AIAAkAHQAcgB1AGUACgAgACAAIAAgACAAIAAgACAAYwBvAG4AdABpAG4AdQBlAAoAIAAgACAAIAB9AAoACgAgACAAIAAgACMAIABTAG8AdQByAGMAZQBHAGUAbgAgAGUAbgB0AHIAeQAgAGUAeABpAHMAdABzACAAaQBuACAAdABoAGUAIAAuAE4ARQBUACAAMQAwACAAcAByAG8AagBlAGMAdAAgAGEAbgBkACAAYwBhAHUAcwBlAGQAIAB0AHIAbwB1AGIAbABlAAoAIAAgACAAIAAjACAAdwBoAGUAbgAgAHQAaABlACAAcAByAG8AagBlAGMAdAAgAHcAYQBzACAAZABvAHcAbgBnAHIAYQBkAGUAZAAgAHQAbwAgAC4ATgBFAFQAIAA5AC4ACgAgACAAIAAgAGkAZgAgACgAJABtAGEAagBvAHIAIAAtAGUAcQAgACcAOQAnACAALQBhAG4AZAAgACQAbABpAG4AZQAgAC0AbQBhAHQAYwBoACAAJwA8AE0AYQB1AGkAWABhAG0AbABJAG4AZgBsAGEAdABvAHIAPgAnACkAIAB7AAoAIAAgACAAIAAgACAAIAAgAGMAbwBuAHQAaQBuAHUAZQAKACAAIAAgACAAfQAKAAoAIAAgACAAIAAjACAASwBlAGUAcAAgAE0AaQBjAHIAbwBzAG8AZgB0AC4ARQB4AHQAZQBuAHMAaQBvAG4AcwAuAEwAbwBnAGcAaQBuAGcALgBEAGUAYgB1AGcAIABhAGwAaQBnAG4AZQBkACAAdwBpAHQAaAAgAHMAZQBsAGUAYwB0AGUAZAAgAFMARABLAC4ACgAgACAAIAAgAGkAZgAgACgAJABsAGkAbgBlACAALQBtAGEAdABjAGgAIAAnAE0AaQBjAHIAbwBzAG8AZgB0AFwALgBFAHgAdABlAG4AcwBpAG8AbgBzAFwALgBMAG8AZwBnAGkAbgBnAFwALgBEAGUAYgB1AGcAJwApACAAewAKACAAIAAgACAAIAAgACAAIABpAGYAIAAoACQAbQBhAGoAbwByACAALQBlAHEAIAAnADkAJwApACAAewAKACAAIAAgACAAIAAgACAAIAAgACAAIAAgACQAbABpAG4AZQAgAD0AIABbAHIAZQBnAGUAeABdADoAOgBSAGUAcABsAGEAYwBlACgAJABsAGkAbgBlACwAIAAnAFYAZQByAHMAaQBvAG4APQAiAFsAXgAiAF0AKgAiACcALAAgACcAVgBlAHIAcwBpAG8AbgA9ACIAOQAuADAALgAwACIAJwApAAoAIAAgACAAIAAgACAAIAAgAH0ACgAgACAAIAAgACAAIAAgACAAZQBsAHMAZQAgAHsACgAgACAAIAAgACAAIAAgACAAIAAgACAAIAAkAGwAaQBuAGUAIAA9ACAAWwByAGUAZwBlAHgAXQA6ADoAUgBlAHAAbABhAGMAZQAoACQAbABpAG4AZQAsACAAJwBWAGUAcgBzAGkAbwBuAD0AIgBbAF4AIgBdACoAIgAnACwAIAAnAFYAZQByAHMAaQBvAG4APQAiADEAMAAuADAALgAwACIAJwApAAoAIAAgACAAIAAgACAAIAAgAH0ACgAgACAAIAAgAH0ACgAKACAAIAAgACAAJABvAHUAdAAuAEEAZABkACgAJABsAGkAbgBlACkACgB9AAoACgBpAGYAIAAoAC0AbgBvAHQAIAAkAGkAbgBzAGUAcgB0AGUAZAApACAAewAKACAAIAAgACAAdABoAHIAbwB3ACAAJwBOAGkAZQAgAHoAbgBhAGwAZQB6AGkAbwBuAG8AIAA8AFAAcgBvAHAAZQByAHQAeQBHAHIAbwB1AHAAPgAgAHcAIABwAGwAaQBrAHUAIABjAHMAcAByAG8AagAuACcACgB9AAoACgBbAEkATwAuAEYAaQBsAGUAXQA6ADoAVwByAGkAdABlAEEAbABsAEwAaQBuAGUAcwAoAAoAIAAgACAAIAAkAHAALAAKACAAIAAgACAAJABvAHUAdAAsAAoAIAAgACAAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABTAHkAcwB0AGUAbQAuAFQAZQB4AHQALgBVAFQARgA4AEUAbgBjAG8AZABpAG4AZwAoACQAZgBhAGwAcwBlACkAKQAKACkACgAKAFcAcgBpAHQAZQAtAEgAbwBzAHQAIAAoACcAWwBPAEsAXQAgAFoAbQBpAGUAbgBpAG8AbgBvACAAcAByAG8AagBlAGsAdAAgAG4AYQAgAFcAaQBuAGQAbwB3AHMALQBvAG4AbAB5ADoAIAAnACAAKwAgACQAdABmAG0AKQAKAA==
 
-if not "!PS_RESULT!"=="0" (
+if errorlevel 1 (
     echo [BLAD] Nie udalo sie zmodyfikowac .csproj.
-    exit /b 1
+    >>"%LOG%" echo [BLAD] Modyfikacja csproj nie powiodla sie.
+    goto :ERROR
 )
 
-echo.
+>>"%LOG%" echo.
+>>"%LOG%" echo ===== CSPROJ PO MODYFIKACJI =====
+>>"%LOG%" type "!PROJECT!"
+>>"%LOG%" echo ===== KONIEC CSPROJ =====
+>>"%LOG%" echo.
 
 rem ============================================================
-rem 8. Czyszczenie
+rem 7. Czyszczenie bin / obj
 rem ============================================================
 
 if exist "!PROJECT_DIR!bin" (
@@ -307,189 +192,242 @@ if exist "!PROJECT_DIR!obj" (
     rmdir /s /q "!PROJECT_DIR!obj"
 )
 
-echo.
-
 rem ============================================================
-rem 9. MAUI
+rem 8. Workload tylko dla Windows
 rem ============================================================
 
+echo.
 echo ============================================================
-echo Instalacja / aktualizacja workloadu MAUI
+echo Instalacja MAUI Windows
 echo ============================================================
 echo.
 
-dotnet workload install maui
+"!DOTNET_CMD!" workload install maui-windows
+set "WORKLOAD_RESULT=!ERRORLEVEL!"
 
-if errorlevel 1 (
+>>"%LOG%" echo Workload install exit code: !WORKLOAD_RESULT!
+"!DOTNET_CMD!" workload list >>"%LOG%" 2>&1
+
+if not "!WORKLOAD_RESULT!"=="0" (
     echo.
-    echo [BLAD] dotnet workload install maui nie powiodlo sie.
-    echo.
-    echo Aktualne workloady:
-    dotnet workload list
-    exit /b 1
+    echo [BLAD] Nie udalo sie zainstalowac workloadu maui-windows.
+    echo Szczegoly sa w setup_maui_log.txt.
+    goto :ERROR
 )
 
-echo.
-echo [OK] Workload MAUI gotowy.
-echo.
+echo [OK] MAUI Windows zainstalowane.
 
 rem ============================================================
-rem 10. Restore
+rem 9. Restore
 rem ============================================================
 
+echo.
 echo ============================================================
 echo Restore
 echo ============================================================
 echo.
 
-dotnet restore "!PROJECT!"
+"!DOTNET_CMD!" restore "!PROJECT!"
+set "RESTORE_RESULT=!ERRORLEVEL!"
+>>"%LOG%" echo Restore exit code: !RESTORE_RESULT!
 
-if errorlevel 1 (
-    echo [BLAD] dotnet restore nie powiodlo sie.
-    exit /b 1
+if not "!RESTORE_RESULT!"=="0" (
+    echo [BLAD] Restore nie powiodl sie.
+    goto :ERROR
 )
 
 echo [OK] Restore zakonczony.
+
+rem ============================================================
+rem 10. Build
+rem ============================================================
+
 echo.
-
-rem ============================================================
-rem 11. Build
-rem ============================================================
-
 echo ============================================================
 echo Build Windows
 echo ============================================================
 echo.
 
-dotnet build "!PROJECT!" -f "!TFM!"
+"!DOTNET_CMD!" build "!PROJECT!" -f "!TFM!"
+set "BUILD_RESULT=!ERRORLEVEL!"
+>>"%LOG%" echo Build exit code: !BUILD_RESULT!
 
-if errorlevel 1 (
-    echo [BLAD] dotnet build nie powiodlo sie.
-    exit /b 1
+if not "!BUILD_RESULT!"=="0" (
+    echo [BLAD] Build nie powiodl sie.
+    goto :ERROR
 )
 
-echo.
 echo [OK] Build zakonczony.
-echo.
 
 rem ============================================================
-rem 12. run_windows.bat
+rem 11. run_windows.bat
 rem ============================================================
 
-set "RUN_BAT=!PROJECT_DIR!run_windows.bat"
+set "RUN_BAT=%ROOT%run_windows.bat"
 
 > "!RUN_BAT!" echo @echo off
 >>"!RUN_BAT!" echo setlocal
 >>"!RUN_BAT!" echo chcp 65001 ^>nul
 >>"!RUN_BAT!" echo cd /d "%%~dp0"
->>"!RUN_BAT!" echo dotnet build -t:Run -f "!TFM!" "%%~dp0!PROJECT_NAME!"
+>>"!RUN_BAT!" echo set "DOTNET=dotnet"
+>>"!RUN_BAT!" echo if exist "%%~dp0.dotnet\dotnet.exe" set "DOTNET=%%~dp0.dotnet\dotnet.exe"
+>>"!RUN_BAT!" echo "%%DOTNET%%" build -t:Run -f "!TFM!" "%%~dp0MauiApp3\MauiApp3.csproj"
 >>"!RUN_BAT!" echo echo.
 >>"!RUN_BAT!" echo if errorlevel 1 echo [BLAD] Nie udalo sie uruchomic aplikacji.
 >>"!RUN_BAT!" echo pause
 
-echo [OK] Utworzono:
-echo      !RUN_BAT!
 echo.
-
 echo ============================================================
-echo PODSUMOWANIE
+echo                         GOTOWE
 echo ============================================================
-echo SDK:       !ACTIVE_SDK!
-echo Framework: !TFM!
 echo.
-echo Uruchomienie:
+echo SDK:
+echo   !SELECTED_SDK!
+echo.
+echo Target:
+echo   !TFM!
+echo.
+echo Program uruchomisz przez:
+echo.
 echo   run_windows.bat
 echo.
-echo lub:
-echo   dotnet build -t:Run -f !TFM! "!PROJECT_NAME!"
+echo albo:
 echo.
-echo Android SDK, JDK i emulator nie byly konfigurowane.
+echo   "!DOTNET_CMD!" build -t:Run -f !TFM! "!PROJECT!"
+echo.
+echo Android SDK, JDK i emulator NIE zostaly zainstalowane.
+echo.
+echo Log:
+echo   %LOG%
 echo.
 
 exit /b 0
 
 
 rem ============================================================
-rem FUNKCJE
+rem SELECT_SDK
 rem ============================================================
 
-:FIND_DOTNET
+:SELECT_SDK
 
-where dotnet >nul 2>&1
-if not errorlevel 1 (
-    dotnet --info >nul 2>&1
-    if not errorlevel 1 exit /b 0
+set "SELECTED_SDK="
+set "NET_MAJOR="
+set "SDK_FILE=%TEMP%\maui_sdks_%RANDOM%_%RANDOM%.txt"
+
+"!DOTNET_CMD!" --list-sdks > "!SDK_FILE!" 2>&1
+
+if errorlevel 1 (
+    type "!SDK_FILE!"
+    >>"%LOG%" type "!SDK_FILE!"
+    del /q "!SDK_FILE!" >nul 2>&1
+    exit /b 1
 )
 
-if exist "%ProgramFiles%\dotnet\dotnet.exe" (
-    set "DOTNET_ROOT=%ProgramFiles%\dotnet"
-    set "PATH=%ProgramFiles%\dotnet;%PATH%"
-    "%ProgramFiles%\dotnet\dotnet.exe" --info >nul 2>&1
-    if not errorlevel 1 exit /b 0
+echo [INFO] Dostepne SDK:
+type "!SDK_FILE!"
+>>"%LOG%" echo ===== DOTNET --LIST-SDKS =====
+>>"%LOG%" type "!SDK_FILE!"
+
+for /f "usebackq tokens=1" %%S in ("!SDK_FILE!") do (
+    set "SDK_VERSION=%%S"
+
+    if "!SDK_VERSION:~0,3!"=="10." (
+        set "SELECTED_SDK=!SDK_VERSION!"
+        set "NET_MAJOR=10"
+    )
 )
 
-if exist "%ProgramFiles(x86)%\dotnet\dotnet.exe" (
-    set "PATH=%ProgramFiles(x86)%\dotnet;%PATH%"
-    "%ProgramFiles(x86)%\dotnet\dotnet.exe" --info >nul 2>&1
-    if not errorlevel 1 exit /b 0
+if not defined SELECTED_SDK (
+    for /f "usebackq tokens=1" %%S in ("!SDK_FILE!") do (
+        set "SDK_VERSION=%%S"
+
+        if "!SDK_VERSION:~0,2!"=="9." (
+            set "SELECTED_SDK=!SDK_VERSION!"
+            set "NET_MAJOR=9"
+        )
+    )
+)
+
+del /q "!SDK_FILE!" >nul 2>&1
+
+if defined SELECTED_SDK (
+    exit /b 0
 )
 
 exit /b 1
 
 
-:INSTALL_DOTNET_WINGET
+rem ============================================================
+rem INSTALL_LOCAL_DOTNET10
+rem ============================================================
 
-where winget >nul 2>&1
+:INSTALL_LOCAL_DOTNET10
+
+set "DOTNET_DIR=%ROOT%.dotnet"
+set "INSTALLER=%TEMP%\dotnet-install.ps1"
+
+if exist "!DOTNET_DIR!\dotnet.exe" (
+    echo [INFO] Folder .dotnet juz istnieje - sprawdzam go.
+    "!DOTNET_DIR!\dotnet.exe" --list-sdks
+    if not errorlevel 1 (
+        exit /b 0
+    )
+)
+
+echo [INFO] Pobieram oficjalny instalator Microsoftu...
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -UseBasicParsing 'https://dot.net/v1/dotnet-install.ps1' -OutFile '%TEMP%\dotnet-install.ps1'"
+
 if errorlevel 1 (
-    echo [UWAGA] WinGet nie jest dostepny.
+    echo [UWAGA] PowerShell nie pobral instalatora. Probuje curl.exe...
+
+    where curl.exe >nul 2>&1
+    if errorlevel 1 (
+        echo [BLAD] Nie mozna pobrac dotnet-install.ps1.
+        >>"%LOG%" echo [BLAD] Pobranie dotnet-install.ps1 nie powiodlo sie.
+        exit /b 1
+    )
+
+    curl.exe -L "https://dot.net/v1/dotnet-install.ps1" -o "!INSTALLER!"
+
+    if errorlevel 1 (
+        echo [BLAD] curl.exe rowniez nie pobral instalatora.
+        exit /b 1
+    )
+)
+
+echo [INFO] Instaluje .NET 10 SDK x64 lokalnie...
+echo [INFO] To moze chwile potrwac.
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "!INSTALLER!" -Channel 10.0 -Quality GA -Architecture x64 -InstallDir "!DOTNET_DIR!" -NoPath
+
+if errorlevel 1 (
+    echo [BLAD] Oficjalny dotnet-install.ps1 zakonczyl sie bledem.
+    >>"%LOG%" echo [BLAD] dotnet-install.ps1 zakonczyl sie bledem.
     exit /b 1
 )
 
-winget install --id Microsoft.DotNet.SDK.10 --exact --source winget --accept-package-agreements --accept-source-agreements
-
-set "WINGET_RESULT=%ERRORLEVEL%"
-echo [INFO] Kod wyjscia WinGet: %WINGET_RESULT%
-
-call :REFRESH_PATH
-
-exit /b %WINGET_RESULT%
-
-
-:INSTALL_DOTNET_SCRIPT
-
-set "DOTNET_INSTALLER=%TEMP%\dotnet-install.ps1"
-
-echo [INFO] Pobieram oficjalny dotnet-install.ps1...
-
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -UseBasicParsing 'https://dot.net/v1/dotnet-install.ps1' -OutFile '%DOTNET_INSTALLER%'"
-
-if errorlevel 1 (
-    echo [BLAD] Nie udalo sie pobrac dotnet-install.ps1.
+if not exist "!DOTNET_DIR!\dotnet.exe" (
+    echo [BLAD] Instalator zakonczyl prace, ale nie ma:
+    echo        !DOTNET_DIR!\dotnet.exe
     exit /b 1
 )
 
-echo [INFO] Instaluje .NET 10 SDK x64 do:
-echo        %ProgramFiles%\dotnet
-
-powershell -NoProfile -ExecutionPolicy Bypass -File "%DOTNET_INSTALLER%" ^
-  -Channel 10.0 ^
-  -Architecture x64 ^
-  -InstallDir "%ProgramFiles%\dotnet"
-
-set "INSTALL_RESULT=%ERRORLEVEL%"
-echo [INFO] Kod wyjscia dotnet-install: %INSTALL_RESULT%
-
-call :REFRESH_PATH
-
-exit /b %INSTALL_RESULT%
-
-
-:REFRESH_PATH
-
-if exist "%ProgramFiles%\dotnet\dotnet.exe" (
-    set "DOTNET_ROOT=%ProgramFiles%\dotnet"
-    set "PATH=%ProgramFiles%\dotnet;%PATH%"
-)
-
+echo [OK] Lokalny .NET 10 zostal zainstalowany.
 exit /b 0
+
+
+:ERROR
+
+echo.
+echo ============================================================
+echo                         BLAD
+echo ============================================================
+echo.
+echo Pelny log:
+echo   %LOG%
+echo.
+echo Podeślij setup_maui_log.txt, jezeli skrypt znow sie zatrzyma.
+echo.
+pause
+exit /b 1
